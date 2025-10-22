@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <title>SmartOrderSync - Place Order</title>
+        <style>
+            :root{
+                --bg:#f4f7fb;
+                --card:#ffffff;
+                --accent:#2563eb;
+                --success:#16a34a;
+                --muted:#6b7280;
+                --danger:#dc2626;
+                --radius:10px;
+            }
+            html,body{height:100%;margin:0;font-family:Inter, Arial, sans-serif;background:linear-gradient(180deg,#eef2ff 0%,var(--bg) 100%);color:#111827}
+            .wrap{max-width:880px;margin:32px auto;padding:24px;background:var(--card);border-radius:var(--radius);box-shadow:0 6px 30px rgba(15,23,42,0.08)}
+            h2{margin:0 0 12px;color:var(--accent)}
+            .grid{display:grid;grid-template-columns:1fr 320px;gap:20px}
+            @media (max-width:820px){ .grid{grid-template-columns:1fr} }
+            form{padding:12px 0}
+            .form-row{display:flex;gap:12px;align-items:center;margin:8px 0}
+            label{flex:1;display:flex;flex-direction:column;font-size:14px;color:#0f172a}
+            select,input[type="number"],input[type="text"]{
+                margin-top:6px;padding:10px 12px;border:1px solid #e6e9ef;border-radius:8px;background:#fff;font-size:14px;outline:none;
+            }
+            select:focus,input:focus{box-shadow:0 0 0 4px rgba(37,99,235,0.06);border-color:var(--accent)}
+            .btn{
+                display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;border:none;background:var(--accent);color:white;cursor:pointer;font-weight:600
+            }
+            .btn:disabled{opacity:0.6;cursor:not-allowed}
+            .info-card{padding:16px;border-radius:10px;background:#f8fafc;border:1px solid #eef2ff}
+            .muted{color:var(--muted);font-size:13px}
+            .price{font-weight:700;color:#0f172a}
+            .meta{font-size:13px;color:var(--muted);margin-top:6px}
+            #result{margin-top:12px;padding:12px;border-radius:8px;background:#0f172a;color:#fff;font-family:monospace;white-space:pre-wrap}
+            .success{background:linear-gradient(90deg,#ecfdf5,#ffffff);border:1px solid #d1fae5;color:#064e3b;padding:12px;border-radius:8px}
+            .error{background:linear-gradient(90deg,#fff1f2,#ffffff);border:1px solid #fecaca;color:var(--danger);padding:12px;border-radius:8px}
+            .row-between{display:flex;justify-content:space-between;align-items:center}
+            .small{font-size:13px;color:var(--muted)}
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <h2>SmartOrderSync — Place Order</h2>
+            <div class="grid">
+                <div>
+                    <form id="orderForm" onsubmit="event.preventDefault(); placeOrder();">
+                        <label>Customer
+                            <select id="customerSelect" required>
+                                <option value="">Loading customers…</option>
+                            </select>
+                        </label>
+
+                        <label>Product
+                            <select id="productSelect" required>
+                                <option value="">Loading products…</option>
+                            </select>
+                        </label>
+
+                        <div class="form-row">
+                            <label style="flex:0.6">Quantity
+                                <input type="number" id="quantityInput" value="1" min="1"/>
+                            </label>
+                            <div style="flex:0.4">
+                                <div class="small">Stock: <span id="stockDisplay" class="small">—</span></div>
+                                <div class="small">Unit: <span id="priceDisplay" class="price">—</span></div>
+                            </div>
+                        </div>
+
+                        <div class="row-between" style="margin-top:12px">
+                            <div class="meta">Total: <span id="totalDisplay" class="price">₹0.00</span></div>
+                            <button id="placeBtn" class="btn" type="submit">Place Order</button>
+                        </div>
+
+                        <div id="result" aria-live="polite" style="display:none"></div>
+                    </form>
+                </div>
+
+                <aside class="info-card">
+                    <div class="small">Quick tips</div>
+                    <ul style="margin:8px 0 0;padding-left:18px;color:var(--muted)">
+                        <li>Choose customer & product. Quantity adapts to stock.</li>
+                        <li>Totals update automatically.</li>
+                        <li>Low stock disables ordering.</li>
+                    </ul>
+                    <div style="margin-top:12px">
+                        <div class="small">Customers sample</div>
+                        <div style="margin-top:6px">
+                            <div class="small">Riya Sen • Amit Roy • Rahul Das</div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+
+        <script>
+            // Sample customers
+            const customers = [
+                {id:1, name:'Riya Sen'},
+                {id:2, name:'Amit Roy'},
+                {id:3, name:'Rahul Das'}
+            ];
+
+            const customerSelect = document.getElementById('customerSelect');
+            const productSelect = document.getElementById('productSelect');
+            const quantityInput = document.getElementById('quantityInput');
+            const stockDisplay = document.getElementById('stockDisplay');
+            const priceDisplay = document.getElementById('priceDisplay');
+            const totalDisplay = document.getElementById('totalDisplay');
+            const resultEl = document.getElementById('result');
+            const placeBtn = document.getElementById('placeBtn');
+
+            function formatCurrency(n){
+                return '₹' + Number(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+            }
+
+            async function loadData(){
+                // populate customers
+                customerSelect.innerHTML = '<option value="">Select customer</option>';
+                customers.forEach(c => {
+                    const o = document.createElement('option');
+                    o.value = c.id; o.text = c.name; customerSelect.add(o);
+                });
+
+                // load products
+                try{
+                    productSelect.innerHTML = '<option value="">Loading products…</option>';
+                    const res = await fetch('/api/products');
+                    if(!res.ok) throw new Error('Failed to fetch products');
+                    const products = await res.json();
+                    populateProducts(products);
+                }catch(err){
+                    productSelect.innerHTML = '<option value="">Unable to load</option>';
+                    showResult({error: ''+err}, 'error');
+                }
+            }
+
+            function populateProducts(products){
+                productSelect.innerHTML = '<option value="">Select product</option>';
+                products.forEach(p => {
+                    const o = document.createElement('option');
+                    o.value = p.product_id ?? p.id; 
+                    o.dataset.price = p.price;
+                    o.dataset.stock = p.stock;
+                    o.text = `${p.name} — ${formatCurrency(p.price)} • stock: ${p.stock}`;
+                    productSelect.add(o);
+                });
+                // reset details
+                updateProductDetails();
+            }
+
+            function updateProductDetails(){
+                const opt = productSelect.selectedOptions[0];
+                if(!opt || !opt.value){
+                    stockDisplay.textContent = '—';
+                    priceDisplay.textContent = '—';
+                    totalDisplay.textContent = formatCurrency(0);
+                    placeBtn.disabled = true;
+                    return;
+                }
+                const price = Number(opt.dataset.price || 0);
+                const stock = Number(opt.dataset.stock ?? 0);
+                priceDisplay.textContent = formatCurrency(price);
+                stockDisplay.textContent = stock;
+                quantityInput.min = 1;
+                quantityInput.max = Math.max(0, stock);
+                if(stock === 0){
+                    quantityInput.value = 0;
+                    placeBtn.disabled = true;
+                    showInlineMessage('Product out of stock', 'error');
+                }else{
+                    if(Number(quantityInput.value) < 1) quantityInput.value = 1;
+                    if(Number(quantityInput.value) > stock) quantityInput.value = stock;
+                    placeBtn.disabled = false;
+                    clearInlineMessage();
+                }
+                updateTotal();
+            }
+
+            function updateTotal(){
+                const opt = productSelect.selectedOptions[0];
+                const price = Number(opt?.dataset.price || 0);
+                const qty = Math.max(0, Number(quantityInput.value || 0));
+                totalDisplay.textContent = formatCurrency(price * qty);
+            }
+
+            function showResult(obj, type){
+                resultEl.style.display = 'block';
+                if(type === 'error'){
+                    resultEl.className = 'error';
+                    resultEl.textContent = typeof obj === 'string' ? obj : (obj.message || JSON.stringify(obj, null, 2));
+                }else if(type === 'success'){
+                    resultEl.className = 'success';
+                    resultEl.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+                }else{
+                    resultEl.className = '';
+                    resultEl.textContent = JSON.stringify(obj, null, 2);
+                }
+            }
+
+            function showInlineMessage(msg, type){
+                // small inline message in result area
+                showResult(msg, type);
+            }
+
+            function clearInlineMessage(){
+                resultEl.style.display = 'none';
+                resultEl.textContent = '';
+            }
+
+            productSelect.addEventListener('change', updateProductDetails);
+            quantityInput.addEventListener('input', () => {
+                // clamp to allowed range
+                const max = Number(quantityInput.max || 999999);
+                if(Number(quantityInput.value) > max) quantityInput.value = max;
+                if(Number(quantityInput.value) < 0) quantityInput.value = 0;
+                updateTotal();
+            });
+
+            async function placeOrder(){
+                clearInlineMessage();
+                const customer_id = customerSelect.value;
+                const product_id = productSelect.value;
+                const quantity = Number(quantityInput.value);
+                if(!customer_id){ showResult('Please select a customer.', 'error'); return; }
+                if(!product_id){ showResult('Please select a product.', 'error'); return; }
+                if(quantity <= 0){ showResult('Quantity must be at least 1.', 'error'); return; }
+
+                placeBtn.disabled = true;
+                placeBtn.textContent = 'Placing…';
+
+                const payload = { customer_id, product_id, quantity };
+                try{
+                    const res = await fetch('/api/place_order', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if(!res.ok){
+                        showResult(data || {error:'Server error'}, 'error');
+                    }else{
+                        showResult({message:'Order placed', response: data}, 'success');
+                    }
+                }catch(err){
+                    showResult({error: ''+err}, 'error');
+                }finally{
+                    placeBtn.disabled = false;
+                    placeBtn.textContent = 'Place Order';
+                    // reload products to refresh stock & details
+                    try{
+                        const prodRes = await fetch('/api/products');
+                        const products = await prodRes.json();
+                        populateProducts(products);
+                        // keep previous selection if still exists
+                        setTimeout(updateProductDetails, 80);
+                    }catch(e){}
+                }
+            }
+
+            // init
+            loadData();
+        </script>
+
+    </body>
+</html>
