@@ -16,6 +16,10 @@ OOP-Driven Business Logic: Modeled core ERP entities (Customer, Product, Order) 
 
 *Business Process Flow*
 
+![E-commerce to ERP Order Flow Diagram 1](assets/image1.png)
+![E-commerce to ERP Order Flow Diagram 2](assets/image2.png)
+![E-commerce to ERP Order Flow Diagram 3](assets/image3.png)
+
 The project models the following automated workflow:
 
 Order Placement: A user interacts with the Frontend to submit a new order.
